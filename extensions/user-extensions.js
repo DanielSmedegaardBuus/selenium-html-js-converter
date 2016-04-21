@@ -14,8 +14,9 @@
  *
  * In this early experimental version, methods exposed via module.exports will
  * be called with the original two Selenese string arguments target and value,
- * plus a wd browser element if target is a locator and the element was found on
- * the page.
+ * and - if target is a locator - a function that uses the wd browser object to
+ * return the DOM element matching the locator. It's a function in order to
+ * support commands that wait for elements to appear.
  *
  * WD functions are included with the generated js cases.
  *
@@ -56,6 +57,144 @@ Selenium.prototype.doSetWindowSize = function (target, value) {
   var dimensions = target.split(/[^0-9]+/);
 
   this.browserbot.getCurrentWindow().resizeTo(dimensions[0], dimensions[1]);
+};
+
+
+
+/**
+ * Custom command used in Nosco to wait for a page and all resources to load.
+ *
+ * @throws   on element not found
+ *
+ * @version  2016-04-21
+ * @since    2016-04-21
+ *
+ * @return   {function}           doWaitForCondition instance
+ */
+Selenium.prototype.doWaitForNoscoPageToLoad = function () {
+  this.doWaitForPageToLoad();
+  return this.doWaitForCondition('selenium.isElementPresent("css=body.loaded")', this.defaultTimeout);
+};
+/**
+ * wd-sync version of the above which will be included with generated tests.
+ *
+ * @throws   on error bubbles
+ *
+ * @version  2016-04-21
+ * @since    2016-04-21
+ *
+ * @return   {void}
+ */
+module.exports.waitForNoscoPageToLoad = function () {
+  waitForPageToLoad(browser);
+  waitFor(function() {
+      return browser.hasElementByCssSelector("body.loaded");
+  }, 'browser.hasElementByCssSelector("body.loaded")');
+};
+
+
+
+/**
+ * Custom command that combines waitForElementPresent and assertVisible.
+ *
+ * In the IDE, an element not being present won't break waitForVisible - it'll
+ * just equate not being present with not being visible and wait for the element
+ * appear and become visible.
+ *
+ * WD, on the other hand, does not equate non-presence with non-visibility.
+ * Rather, waitForVisible will break if the element is not present, as it will
+ * try to fetch the element in order to check its visibility.
+ *
+ * @throws   on element not found
+ *
+ * @version  2016-04-21
+ * @since    2016-04-21
+ *
+ * @return   {function}           doWaitForCondition instance
+ */
+Selenium.prototype.doWaitForElementPresentAndVisible = function (locator) {
+  /* This already works in the IDE, so let's not reinvent the wheel ;) */
+  return this.doWaitForCondition('selenium.isVisible("'+locator+'")', this.defaultTimeout);
+};
+/**
+ * wd-sync version of the above which will be included with generated tests.
+ *
+ * @throws   on element not presenting, or not being visible when doing so.
+ *
+ * @version  2016-04-21
+ * @since    2016-04-21
+ *
+ * @param    {string}    target   Selenese <target> attribute value
+ * @param    {string}    value    Selenese <value> attribute value (ignored)
+ * @param    {function}  element  function returning <target> as wd-sync browser
+ *                                element if <target> is a locator and the
+ *                                element exists, null if not a locator.
+ * @return   {void}
+ */
+module.exports.waitForElementPresentAndVisible = function (target, value, element) {
+  /* We may already be wrapped in a withRetry, but if we are it doesn't change the overall amount of time being spent before finally giving up. And if we're not, we'd not be waiting if we didn't wrap it, so: */
+  withRetry(function () {
+    var wdElement = element();
+    if (!wdElement || !wdElement.isDisplayed())
+      throw new Error ('Element did not appear');
+  });
+};
+
+
+
+/**
+ * Custom command used in Nosco to click and wait for a page and all resources
+ * to load.
+ *
+ * @throws   on element not found
+ *
+ * @version  2016-04-21
+ * @since    2016-04-21
+ *
+ * @param    {string}    locator  Element locator
+ * @return   {function}           doWaitForCondition instance
+ */
+Selenium.prototype.doClickAndNoscoWait = function (locator) {
+  this.doClick(locator);
+  // this.doWaitForPageToLoad();
+  return this.doWaitForCondition('selenium.isElementPresent("css=body.loaded")', this.defaultTimeout);
+};
+/**
+ * wd-sync version of the above which will be included with generated tests.
+ *
+ * @throws   on raw element not implementing .click()
+ *
+ * @version  2016-04-21
+ * @since    2016-04-21
+ *
+ * @note     Requires wd-sync-raw or pull request
+ *           https://github.com/sebv/node-wd-sync/pull/30 to be merged to
+ *           vanilla wd-sync.
+ *
+ * @param    {string}    target   Selenese <target> attribute value
+ * @param    {string}    value    Selenese <value> attribute value (ignored)
+ * @param    {function}  element  function returning <target> as wd-sync browser
+ *                                element if <target> is a locator and the
+ *                                element exists, null if not a locator.
+ * @return   {void}
+ */
+module.exports.clickAndNoscoWait = function (target, value, element) {
+  /* .execute takes just a function body as a string to be eval'ed: */
+  browser.execute(functionBody(function () {
+    var element = arguments[0];
+    var target  = arguments[1];
+
+    if (typeof element.click !== 'function')
+      throw new Error('Element at ' + target + ' does not have a .click() function');
+
+    document.body.className = document.body.className.replace(/(^| )loaded($| )/, '');
+
+    element.click();
+  }), [element().rawElement /* Important! element is mangled by wd-sync; we need the raw wd element */, target]);
+
+  waitFor(function() {
+      return browser.hasElementByCssSelector("body.loaded");
+  }, 'browser.hasElementByCssSelector("body.loaded")');
 };
 
 
@@ -120,9 +259,9 @@ Selenium.prototype.doTypeRedactor = function (locator, text) {
  *
  * @param    {string}    target   Selenese <target> attribute value
  * @param    {string}    value    Selenese <value> attribute value
- * @param    {wd-sync}   element  <target> as wd-sync browser element if
- *                                <target> is a locator and the element exists,
- *                                otherwise null.
+ * @param    {function}  element  function returning <target> as wd-sync browser
+ *                                element if <target> is a locator and the
+ *                                element exists, null if not a locator.
  * @return   {void}
  */
 module.exports.typeRedactor = function (target, value, element) {
@@ -155,7 +294,7 @@ module.exports.typeRedactor = function (target, value, element) {
       }, 50);
     }, 50);
     return className;
-  }), [element.rawElement /* Important! element is mangled by wd-sync; we need the raw wd element */, value]);
+  }), [element().rawElement /* Important! element is mangled by wd-sync; we need the raw wd element */, value]);
   waitFor(function () {
     return browser.hasElementByCssSelector('.' + className);
   }, 'browser.hasElementByCssSelector(".' + className + '") [to mark completion of typeRedactor execution]');

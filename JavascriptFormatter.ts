@@ -841,6 +841,7 @@ SeleniumWebDriverAdaptor.prototype.userCommand = function() {
     try {
         locator = this._elementLocator(this.rawArgs[0]);
         locator = WDAPI.Driver.searchContext(locator.type, locator.string)
+        locator = 'function () { return ' + locator + '; }';
     } catch (ignore) { }
     return driver.userCommand(commandName, this.rawArgs[0], this.rawArgs[1], locator);
 };
@@ -1434,7 +1435,7 @@ WDAPI.Driver.prototype.selectWindow = function(name) {
 WDAPI.Driver.prototype.userCommand = function(command, target, value, locator) {
     target = '"' + ('' + target).replace(/"/g, '\\"') + '"';
     value = '"' + ('' + value).replace(/"/g, '\\"') + '"';
-    return command + '(' + target + ', ' + value + ', ' + locator + ')\n';
+    return command + '(' + target + ', ' + value + ',' + locator + ')\n';
 };
 
 WDAPI.Driver.prototype.setWindowSize = function(width, height) {
