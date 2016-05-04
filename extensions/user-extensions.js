@@ -13,10 +13,12 @@
  * instead (see examples below).
  *
  * In this early experimental version, methods exposed via module.exports will
- * be called with the original two Selenese string arguments target and value,
- * and - if target is a locator - a function that uses the wd browser object to
- * return the DOM element matching the locator. It's a function in order to
- * support commands that wait for elements to appear.
+ * be called with the original two Selenese string arguments "target" and
+ * "value", and - if either or both of these arguments is a locator - one or two
+ * functions which, when called, uses the wd browser object to return the DOM
+ * element matching that locator. The reason it is a function and not the DOM
+ * element itself, is in order to support custom commands that must wait for an
+ * elements to appear in the DOM.
  *
  * WD functions are included with the generated js cases.
  *
@@ -128,7 +130,7 @@ Selenium.prototype.doWaitForElementPresentAndVisible = function (locator) {
  * @param    {string}    value    Selenese <value> attribute value (ignored)
  * @param    {function}  element  function returning <target> as wd-sync browser
  *                                element if <target> is a locator and the
- *                                element exists, null if not a locator.
+ *                                element exists, undefined if not a locator.
  * @return   {void}
  */
 module.exports.waitForElementPresentAndVisible = function (target, value, element) {
@@ -156,7 +158,6 @@ module.exports.waitForElementPresentAndVisible = function (target, value, elemen
  */
 Selenium.prototype.doClickAndNoscoWait = function (locator) {
   this.doClick(locator);
-  // this.doWaitForPageToLoad();
   return this.doWaitForCondition('selenium.isElementPresent("css=body.loaded")', this.defaultTimeout);
 };
 /**
@@ -175,7 +176,7 @@ Selenium.prototype.doClickAndNoscoWait = function (locator) {
  * @param    {string}    value    Selenese <value> attribute value (ignored)
  * @param    {function}  element  function returning <target> as wd-sync browser
  *                                element if <target> is a locator and the
- *                                element exists, null if not a locator.
+ *                                element exists, undefined if not a locator.
  * @return   {void}
  */
 module.exports.clickAndNoscoWait = function (target, value, element) {
@@ -185,7 +186,7 @@ module.exports.clickAndNoscoWait = function (target, value, element) {
     var target  = arguments[1];
 
     if (typeof element.click !== 'function')
-      throw new Error('Element at ' + target + ' does not have a .click() function');
+      throw new Error('Element at ' + target + ' does not have a .click() method');
 
     document.body.className = document.body.className.replace(/(^| )loaded($| )/, '');
 
@@ -195,6 +196,76 @@ module.exports.clickAndNoscoWait = function (target, value, element) {
   waitFor(function() {
       return browser.hasElementByCssSelector("body.loaded");
   }, 'browser.hasElementByCssSelector("body.loaded")');
+};
+
+
+/**
+ * Custom command used in Nosco to first focus an element (to assure its
+ * visibility inside the viewport) and then click it.
+ *
+ * If the second argument (i.e. the "value" argument) is also specified, it is
+ * assumed to be a locator to let a different element from the one being focused
+ * be the target of the click command.
+ *
+ * Why? Because Selenium is weird and sometimes just moves the viewport close
+ * to the element you're trying to reveal, but does not actually reveal it.
+ *
+ * @throws   on element not found
+ *
+ * @version  2016-05-04
+ * @since    2016-05-03
+ *
+ * @param    {string}    focus    Element locator to focus and click
+ * @param    {string}    click    Optional element locator to click instead
+ * @return   {function}           doWaitForCondition instance
+ */
+Selenium.prototype.doFocusAndClick = function (focus, click) {
+  this.doFocus(focus);
+  this.doClick(click || focus);
+};
+/**
+ * wd-sync version of the above which will be included with generated tests.
+ *
+ * @throws   on raw element not implementing .click()
+ *
+ * @version  2016-05-04
+ * @since    2016-05-03
+ *
+ * @note     Requires wd-sync-raw or pull request
+ *           https://github.com/sebv/node-wd-sync/pull/30 to be merged to
+ *           vanilla wd-sync.
+ *
+ * @param    {string}    target   Selenese <target> attribute value
+ * @param    {string}    value    Selenese <value> attribute value (ignored)
+ * @param    {function}  element  function returning <target> as wd-sync browser
+ *                                element if <target> is a locator and the
+ *                                element exists, undefined if not a locator.
+ * @param    {function}  element2 function returning <value> as wd-sync browser
+ *                                element if <value> is a locator and the
+ *                                element exists, undefined if not a locator.
+ * @return   {void}
+ */
+module.exports.focusAndClick = function (focusLocator, clickLocator, focusElement, clickElement) {
+  browser.execute(functionBody(function () {
+    var elToFocus = arguments[0];
+    var elToClick = arguments[1];
+    var focusLocator = arguments[2];
+    var clickLocator = arguments[3];
+
+    if (typeof elToFocus.focus !== 'function')
+      throw new Error('Element at ' + focusLocator + ' does not have a .focus() method');
+
+    if (typeof elToClick.focus !== 'function')
+      throw new Error('Element at ' + clickLocator + ' does not have a .click() method');
+
+    elToFocus.focus();
+    elToClick.click();
+  }), [
+    focusElement().rawElement,
+    (clickElement || focusElement)().rawElement,
+    focusLocator,
+    (clickLocator || focusLocator)
+  ]);
 };
 
 
@@ -261,7 +332,7 @@ Selenium.prototype.doTypeRedactor = function (locator, text) {
  * @param    {string}    value    Selenese <value> attribute value
  * @param    {function}  element  function returning <target> as wd-sync browser
  *                                element if <target> is a locator and the
- *                                element exists, null if not a locator.
+ *                                element exists, undefined if not a locator.
  * @return   {void}
  */
 module.exports.typeRedactor = function (target, value, element) {

@@ -837,13 +837,16 @@ SeleniumWebDriverAdaptor.prototype.selectWindow = function() {
 SeleniumWebDriverAdaptor.prototype.userCommand = function() {
     var driver = new WDAPI.Driver();
     var commandName = this.rawArgs[2];
-    var locator;
+    var locator, locator2;
     try {
         locator = this._elementLocator(this.rawArgs[0]);
         locator = WDAPI.Driver.searchContext(locator.type, locator.string)
         locator = 'function () { return ' + locator + '; }';
+        locator2 = this._elementLocator(this.rawArgs[1]);
+        locator2 = WDAPI.Driver.searchContext(locator2.type, locator2.string)
+        locator2 = 'function () { return ' + locator2 + '; }';
     } catch (ignore) { }
-    return driver.userCommand(commandName, this.rawArgs[0], this.rawArgs[1], locator);
+    return driver.userCommand(commandName, this.rawArgs[0], this.rawArgs[1], locator, locator2);
 };
 
 /* wd does not support the windowFocus command. window(), called by selectWindow, both selects and focuses a window, so if the previously parsed command was selectWindow, we should be good. */
@@ -1432,10 +1435,10 @@ WDAPI.Driver.prototype.selectWindow = function(name) {
   return this.ref + ".window(" + name + ")";
 };
 
-WDAPI.Driver.prototype.userCommand = function(command, target, value, locator) {
+WDAPI.Driver.prototype.userCommand = function(command, target, value, locator, locator2) {
     target = '"' + ('' + target).replace(/"/g, '\\"') + '"';
     value = '"' + ('' + value).replace(/"/g, '\\"') + '"';
-    return command + '(' + target + ', ' + value + ',' + locator + ')\n';
+    return command + '(' + target + ', ' + value + ',' + locator + ',' + locator2 + ')\n';
 };
 
 WDAPI.Driver.prototype.setWindowSize = function(width, height) {
