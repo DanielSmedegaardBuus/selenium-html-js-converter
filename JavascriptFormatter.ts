@@ -1510,7 +1510,7 @@ WDAPI.Driver.prototype.getCurrentUrl = function() {
 };
 
 WDAPI.Driver.prototype.get = function(url) {
-  return this.ref + ".get(addBaseUrl(" + url + "))";
+  return this.ref + ".get(" + url + ")";
 };
 
 WDAPI.Driver.prototype.getTitle = function() {

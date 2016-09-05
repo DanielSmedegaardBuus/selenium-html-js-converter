@@ -1373,7 +1373,7 @@ WDAPI.Driver.prototype.getCurrentUrl = function () {
     return this.ref + ".url()";
 };
 WDAPI.Driver.prototype.get = function (url) {
-    return this.ref + ".get(addBaseUrl(" + url + "))";
+    return this.ref + ".get(" + url + ")";
 };
 WDAPI.Driver.prototype.getTitle = function () {
     return this.ref + ".title()";
