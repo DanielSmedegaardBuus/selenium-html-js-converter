@@ -506,7 +506,8 @@ function string(value) {
     value = value.replace(/\"/g, '\\"');
     value = value.replace(/\r/g, '\\r');
     value = value.replace(/\n/g, '\\n');
-    return '"' + value + '"';
+    // Detect URL strings, and wrap them in addBaseUrl() calls:
+    return value.match(/^http(s)?:\/\//) ? 'addBaseUrl("' + value + '")' : '"' + value + '"';
   } else {
     return '""';
   }
