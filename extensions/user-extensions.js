@@ -150,7 +150,7 @@ module.exports.waitForElementPresentAndVisible = function (target, value, elemen
  *
  * @throws   on element not found
  *
- * @version  2016-04-21
+ * @version  2016-11-16
  * @since    2016-04-21
  *
  * @param    {string}    locator  Element locator
@@ -158,6 +158,7 @@ module.exports.waitForElementPresentAndVisible = function (target, value, elemen
  */
 Selenium.prototype.doClickAndNoscoWait = function (locator) {
   this.doClick(locator);
+  this.doWaitForPageToLoad();
   return this.doWaitForCondition('selenium.isElementPresent("css=body.loaded")', this.defaultTimeout);
 };
 /**
