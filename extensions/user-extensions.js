@@ -150,13 +150,14 @@ module.exports.waitForElementPresentAndVisible = function (target, value, elemen
  *
  * @throws   on element not found
  *
- * @version  2016-11-16
+ * @version  2016-11-23
  * @since    2016-04-21
  *
  * @param    {string}    locator  Element locator
  * @return   {function}           doWaitForCondition instance
  */
 Selenium.prototype.doClickAndNoscoWait = function (locator) {
+  this.doRunScript("document.body.className = document.body.className.replace(/(^| )loaded($| )/, '');");
   this.doClick(locator);
   this.doWaitForPageToLoad();
   return this.doWaitForCondition('selenium.isElementPresent("css=body.loaded")', this.defaultTimeout);
