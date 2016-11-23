@@ -157,7 +157,7 @@ module.exports.waitForElementPresentAndVisible = function (target, value, elemen
  * @return   {function}           doWaitForCondition instance
  */
 Selenium.prototype.doClickAndNoscoWait = function (locator) {
-  this.doRunScript("document.body.className = document.body.className.replace(/(^| )loaded($| )/, '');");
+  this.doRunScript("document.body.className = document.body.className.replace(/(^| )loaded($| )/, ' ');");
   this.doClick(locator);
   this.doWaitForPageToLoad();
   return this.doWaitForCondition('selenium.isElementPresent("css=body.loaded")', this.defaultTimeout);
@@ -167,7 +167,7 @@ Selenium.prototype.doClickAndNoscoWait = function (locator) {
  *
  * @throws   on raw element not implementing .click()
  *
- * @version  2016-04-21
+ * @version  2016-11-23
  * @since    2016-04-21
  *
  * @note     Requires wd-sync-raw or pull request
@@ -190,7 +190,7 @@ module.exports.clickAndNoscoWait = function (target, value, element) {
     if (typeof element.click !== 'function')
       throw new Error('Element at ' + target + ' does not have a .click() method');
 
-    document.body.className = document.body.className.replace(/(^| )loaded($| )/, '');
+    document.body.className = document.body.className.replace(/(^| )loaded($| )/, ' ');
 
     element.click();
   }), [element().rawElement /* Important! element is mangled by wd-sync; we need the raw wd element */, target]);
