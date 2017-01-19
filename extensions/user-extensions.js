@@ -97,31 +97,26 @@ module.exports.waitForNoscoPageToLoad = function () {
 
 
 /**
- * Custom command that combines waitForElementPresent and assertVisible.
- *
- * In the IDE, an element not being present won't break waitForVisible - it'll
- * just equate not being present with not being visible and wait for the element
- * appear and become visible.
- *
- * WD, on the other hand, does not equate non-presence with non-visibility.
- * Rather, waitForVisible will break if the element is not present, as it will
- * try to fetch the element in order to check its visibility.
+ * Custom command that combines waitForElementPresent and waitForVisible.
  *
  * @throws   on element not found
  *
- * @version  2016-04-21
+ * @version  2017-01-16
  * @since    2016-04-21
  *
  * @return   {function}           doWaitForCondition instance
  */
 Selenium.prototype.doWaitForElementPresentAndVisible = function (locator) {
-  /* This already works in the IDE, so let's not reinvent the wheel ;) */
-  return this.doWaitForCondition('selenium.isVisible("'+locator+'")', this.defaultTimeout);
+  /* We have to make sure we escape quotes! D'oh! */
+  locator = locator.replace(/"/g, '\\"');
+  return this.doWaitForCondition('selenium.isElementPresent("'+locator+'") ' +
+                                 '&& selenium.isVisible("'+locator+'")',
+                                 this.defaultTimeout);
 };
 /**
  * wd-sync version of the above which will be included with generated tests.
  *
- * @throws   on element not presenting, or not being visible when doing so.
+ * @throws   on element not presenting, or not becoming visible after doing so.
  *
  * @version  2016-04-21
  * @since    2016-04-21
@@ -141,6 +136,288 @@ module.exports.waitForElementPresentAndVisible = function (target, value, elemen
       throw new Error ('Element did not appear');
   });
 };
+
+
+
+
+/**
+ * Custom command used in Nosco to quickly authorize as a given user, and
+ * optionally navigate to  a specified URL on success. If started on a non-test
+ * site URL, it first navigates either to the specified URL on the baseUrl test
+ * site, or if left out, to the baseUrl itself. If we ultimately find ourselves
+ * on the login page after successful instaAuth, we navigate to baseUrl as well.
+ *
+ * Note that if run on an open login page with a ?ref= in the current location,
+ * it will perform slower and/or weirdly (if the ?ref targets /logout/reset),
+ * since the API server will pick up the ref and redirect to it within the
+ * javascript POST call.
+ *
+ * @version  2017-01-18
+ * @since    2017-01-12
+ *
+ * @param    {string}    creds    email:pwd string
+ * @param    {string}    url      optional url to open upon successful auth
+ * @return   {function}           doWaitForCondition instance
+ */
+Selenium.prototype.doInstaAuth = function (creds, url) {
+  creds = creds.split(':');
+  url   = url || '';
+
+  var freq    = 50;
+  var bot     = selenium.browserbot;
+  var baseUrl = selenium.browserbot.baseUrl;
+  var onSite  = new RegExp('^' + baseUrl);
+  var atLogin = new RegExp('^' + baseUrl + (baseUrl[baseUrl.length-1] === '/' ? 'login' : '/login'));
+  var self    = this;
+
+  if (url !== '') {
+    if (url.match(/^\//)) {
+      url = baseUrl.replace(/\/$/, '') + url;
+    } else if (!onSite.test(url)) {
+      throw new Error('Target, "'+url+'", not on base URL, "'+baseUrl);
+    }
+  }
+
+  function ensureNoscoUrl (target, callback) {
+    var location = bot.getCurrentWindow().document.location;
+
+    // We only redirect when either:
+    //   *) We're not on the test site at all
+    //   *) We have an explicit target which isn't where we are
+    if (onSite.test(location.href) && (!target || target === location.href))
+      return callback();
+
+    bot.getCurrentWindow().document.body.className =
+      (bot.getCurrentWindow().document.body.className || '').
+      replace(/(^| )loaded($| )/, ' ');
+
+    location.href = target || baseUrl;
+
+    var timeLeft = self.defaultTimeout;
+    var iv = setInterval(function () {
+      if (timeLeft <= 0) {
+        clearInterval(iv);
+        return callback(new Error('Timed out trying to reach the test site'));
+      }
+
+      timeLeft -= freq;
+
+      try {
+        if (bot.getCurrentWindow().document.body.className.match(/(^| )loaded($| )/)
+            && typeof bot.getCurrentWindow().$ === 'function') {
+          clearInterval(iv);
+          return callback();
+        }
+      } catch (ignored) {}
+    }, freq);
+  }
+
+  function logIn (email, pwd, callback) {
+    selenium.doRunScript(
+      "document.body.className = document.body.className.replace(/(^| )(not-)?logged-in($| )/g, ' ');" +
+      "$.post('/login', { email: '"+email+"', password: '"+pwd+"' }).always(function () {" +
+      "  if (document.cookie.match(/socketToken/))" +
+      "      $('body').addClass('logged-in');" +
+      "  else" +
+      "      $('body').addClass('not-logged-in');" +
+      "});"
+    );
+
+    var timeLeft = self.defaultTimeout;
+    var iv = setInterval(function () {
+      if (timeLeft <= 0) {
+        clearInterval(iv);
+        return callback(new Error('Timed out waiting for login response'));
+      }
+
+      timeLeft -= freq;
+
+      try {
+        if (bot.getCurrentWindow().document.body.className.match(/(^| )logged-in($| )/)) {
+          clearInterval(iv);
+          return callback();
+        }
+        if (bot.getCurrentWindow().document.body.className.match(/(^| )not-logged-in($| )/)) {
+          clearInterval(iv);
+          return callback(new Error('Login failed'));
+        }
+      } catch (ignored) {}
+    }, freq);
+  }
+
+  ensureNoscoUrl(false, function (err) {
+    if (err) {
+      throw err;
+      return;
+    }
+    self.doDeleteAllVisibleCookies();
+    logIn(creds[0], creds[1], function (err) {
+      if (err) {
+        throw err;
+        return;
+      }
+      var curUrl = bot.getCurrentWindow().document.location.href;
+      if ((!url || curUrl === url) && !atLogin.test(curUrl)) {
+        bot.getCurrentWindow().document.body.className += " insta-logged-in";
+        return;
+      }
+      ensureNoscoUrl(url || baseUrl, function (err) {
+        if (err) {
+          throw err;
+          return;
+        }
+        bot.getCurrentWindow().document.body.className += " insta-logged-in";
+      });
+    });
+  });
+
+  selenium.doRunScript("document.body.className = document.body.className.replace(/(^| )insta-logged-in($| )/, ' ');");
+  return this.doWaitForCondition('selenium.isElementPresent("css=body.insta-logged-in")', this.defaultTimeout);
+}
+/**
+ * wd-sync version of the above which will be included with generated tests.
+ *
+ * @version  2017-01-16
+ * @since    2017-01-12
+ *
+ * @note     Requires wd-sync-raw or pull request
+ *           https://github.com/sebv/node-wd-sync/pull/30 to be merged to
+ *           vanilla wd-sync.
+ *
+ * @param    {string}    creds    Selenese <target> attribute value; usr:pwd
+ * @param    {string}    url      Selenese <value> attribute value; target url
+ * @param    {function}  element  function returning <target> as wd-sync browser
+ *                                element if <target> is a locator and the
+ *                                element exists, undefined if not a locator.
+ * @return   {void}
+ */
+module.exports.instaAuth = function (creds, url, element) {
+  var baseUrl = options.baseUrl;
+  var onSite  = new RegExp('^' + baseUrl);
+  var atLogin = new RegExp('^' + baseUrl + (baseUrl[baseUrl.length-1] === '/' ? 'login' : '/login'));
+
+  url         = url || '';
+
+  if (url !== '') {
+    if (url.match(/^\//)) {
+      url = baseUrl.replace(/\/$/, '') + url;
+    } else if (!onSite.test(url)) {
+      throw new Error('Target, "'+url+'", not on base URL, "'+baseUrl);
+    }
+  }
+
+  if (!onSite.test(location.href)) {
+    browser.get(url || baseUrl);
+    waitForNoscoPageToLoad();
+  }
+
+  browser.execute(functionBody(function () {
+    var email = arguments[0];
+    var pwd   = arguments[0];
+    $('body').removeClass('not-logged-in logged-in');
+    $.post('/login', { email: email, password: pwd }).always(function () {
+      if (document.cookie.match(/socketToken/))
+          $('body').addClass('logged-in');
+    });
+  }), creds.split(':'));
+
+  waitFor(function() {
+      return browser.hasElementByCssSelector("body.logged-in");
+  }, 'browser.hasElementByCssSelector("body.logged-in")');
+
+  if ((url && location.href !== url) || atLogin.test(location.href)) {
+    browser.get(url || baseUrl);
+    waitForNoscoPageToLoad();
+  }
+};
+
+
+
+
+/**
+ * Custom command used in Nosco to open a URL if not running on the base url,
+ * or if at the logout/reset special page.
+ *
+ * If no URL is provided, baseUrl is used.
+ *
+ * @version  2017-01-18
+ * @since    2017-01-12
+ *
+ * @param    {string}    url      optional url to open if not already on baseUrl
+ * @return   {function}           doWaitForCondition instance
+ */
+Selenium.prototype.doEnsureNoscoUrl = function (url) {
+  var bot      = selenium.browserbot;
+  var baseUrl  = bot.baseUrl;
+  var onSite   = new RegExp('^' + baseUrl);
+  var atReset  = new RegExp('^' + baseUrl + (baseUrl[baseUrl.length-1] === '/' ? 'logout/reset' : '/logout/reset'));
+  var location = selenium.browserbot.getCurrentWindow().document.location;
+
+  if (!onSite.test(location.href) || atReset.test(location.href)) {
+    var target = url || baseUrl;
+
+    if (target && target.match(/^\//)) {
+      target = baseUrl.replace(/\/$/, '') + target;
+    } else if (!onSite.test(target)) {
+      throw new Error('Target, "'+target+'", not on base URL, "'+baseUrl);
+    }
+
+    bot.getCurrentWindow().document.body.className =
+      (bot.getCurrentWindow().document.body.className || '').
+      replace(/(^| )loaded($| )/, ' ');
+
+    location.href = target;
+
+    return this.doWaitForNoscoPageToLoad();
+  }
+};
+/**
+ * wd-sync version of the above which will be included with generated tests.
+ *
+ * @throws   on target URL not on baseUrl.
+ *
+ * @version  2017-01-18
+ * @since    2017-01-12
+ *
+ * @note     Requires wd-sync-raw or pull request
+ *           https://github.com/sebv/node-wd-sync/pull/30 to be merged to
+ *           vanilla wd-sync.
+ *
+ * @param    {string}    target   Selenese <target> attribute value; url
+ * @param    {string}    value    Selenese <value> attribute value
+ * @param    {function}  element  function returning <target> as wd-sync browser
+ *                                element if <target> is a locator and the
+ *                                element exists, undefined if not a locator.
+ * @return   {void}
+ */
+module.exports.ensureNoscoUrl = function (target, value, element) {
+  /* .execute takes just a function body as a string to be eval'ed: */
+  browser.execute(functionBody(function () {
+    var target  = arguments[0];
+    var baseUrl = options.baseUrl;
+    var onSite  = new RegExp('^' + baseUrl);
+    var atReset = new RegExp('^' + baseUrl + (baseUrl[baseUrl.length-1] === '/' ? 'logout/reset' : '/logout/reset'));
+
+    if (!onSite.test(location.href)) {
+      var target = arguments[0] || baseUrl;
+
+      if (target && target.match(/^\//)) {
+        target = baseUrl.replace(/\/$/, '') + target;
+      } else if (!onSite.test(target)) {
+        throw new Error('Target, "'+target+'", not on base URL, "'+baseUrl);
+      }
+
+      $('body').removeClass('loaded');
+
+      location.href = target;
+    }
+  }), [target]);
+
+  waitFor(function() {
+      return browser.hasElementByCssSelector("body.loaded");
+  }, 'browser.hasElementByCssSelector("body.loaded")');
+};
+
 
 
 
@@ -199,6 +476,7 @@ module.exports.clickAndNoscoWait = function (target, value, element) {
       return browser.hasElementByCssSelector("body.loaded");
   }, 'browser.hasElementByCssSelector("body.loaded")');
 };
+
 
 
 /**
@@ -268,6 +546,31 @@ module.exports.focusAndClick = function (focusLocator, clickLocator, focusElemen
     focusLocator,
     (clickLocator || focusLocator)
   ]);
+};
+
+
+
+/**
+ * Custom command used to clear local storage.
+ *
+ * @version  2017-01-19
+ * @since    2017-01-19
+ *
+ * @return   {void}
+ */
+Selenium.prototype.doClearLocalStorage = function () {
+  selenium.browserbot.getCurrentWindow().localStorage.clear();
+};
+/**
+ * wd-sync version of the above which will be included with generated tests.
+ *
+ * @version  2017-01-19
+ * @since    2017-01-19
+ *
+ * @return   {void}
+ */
+module.exports.clearLocalStorage = function () {
+  browser.execute('window.localStorage.clear();');
 };
 
 
